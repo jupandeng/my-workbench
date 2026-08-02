@@ -25,7 +25,6 @@ const WeatherModule = {
 
   render() {
     const loc = this.locationCache;
-    const cityHint = loc && loc.city ? `📍 ${loc.city}` : '';
     return `
       <div class="home-clock">
         <div class="time" id="wt-time">--:--:--</div>
@@ -33,20 +32,24 @@ const WeatherModule = {
       </div>
       <div class="card weather-main" id="wt-info">
         <div style="color:var(--text-secondary)">
-          ${loc ? '更新天气中...' : '正在自动定位...'}
-          ${cityHint ? `<br><span style="font-size:12px">${cityHint}</span>` : ''}
+          ${loc ? '更新天气中...' : '搜索城市查看天气'}
         </div>
       </div>
-      <div style="text-align:center;margin-top:8px">
-        <button class="btn btn-small" id="wt-manual" style="font-size:11px;color:var(--text-secondary)">
-          🔍 手动搜索城市
-        </button>
-        <button class="btn btn-small" id="wt-refresh" style="font-size:11px;color:var(--text-secondary);display:none">
-          🔄 重新定位
-        </button>
+      <div class="card" style="margin-top:10px">
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">
+          🌍 搜索全球任意城市天气
+        </div>
+        <div style="display:flex;gap:8px">
+          <input id="city-input" class="todo-input" style="flex:1;text-align:center" placeholder="输入城市名，如：东京、伦敦、纽约...">
+          <button class="btn btn-blue" id="city-btn">查询</button>
+        </div>
+        <div id="city-suggestions" style="margin-top:8px;max-height:160px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:5px"></div>
+        <div id="city-search-status" style="font-size:11px;color:var(--text-secondary);margin-top:6px;text-align:center"></div>
       </div>
-      <div id="wt-manual-box" style="display:none"></div>
-      <div id="wt-error-msg" style="display:none;text-align:center;padding:8px"></div>
+      <button class="btn btn-small" id="wt-refresh" style="font-size:11px;color:var(--text-secondary);display:none;margin:8px auto;width:fit-content">
+        📍 使用当前位置
+      </button>
+      <div id="wt-error-msg" style="display:none;text-align:center;padding:4px"></div>
     `;
   },
 
@@ -68,12 +71,10 @@ const WeatherModule = {
 
   // 返回 { coords } 或 { error: '原因' }
   async getLocation() {
-    // 1. 检查 GPS 硬件是否可用
     if (!navigator.geolocation) {
-      return { error: '浏览器不支持GPS，请手动搜索城市' };
+      return { error: '浏览器不支持GPS' };
     }
 
-    // 2. 检查权限状态（如果之前被拒绝，直接跳过）
     let permissionDenied = false;
     try {
       if (navigator.permissions) {
@@ -86,13 +87,10 @@ const WeatherModule = {
       try {
         const pos = await new Promise((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
-            timeout: 10000,
-            maximumAge: 600000,
-            enableHighAccuracy: false
+            timeout: 10000, maximumAge: 600000, enableHighAccuracy: false
           });
         });
         const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-        // 反查城市名
         try {
           const resp = await fetch(
             `https://geocoding-api.open-meteo.com/v1/search?latitude=${coords.lat}&longitude=${coords.lon}&count=1&language=zh`,
@@ -108,21 +106,15 @@ const WeatherModule = {
         Storage.set('location', coords);
         return { coords };
       } catch (err) {
-        // err.code: 1=PERMISSION_DENIED, 2=POSITION_UNAVAILABLE, 3=TIMEOUT
         if (err.code === 1) {
-          return { error: '定位权限被拒绝了' };
+          return { error: '定位权限被拒绝，请在手机设置中允许' };
         }
-        // 其他错误继续尝试 IP 定位
       }
-    } else {
-      // 权限已被拒绝，不尝试 GPS
     }
 
-    // 3. 有缓存直接返回
     const cached = Storage.get('location');
     if (cached) return { coords: cached };
 
-    // 4. IP 定位（ipapi.co 国内可能慢，加 api.ip.sb 备用）
     const ipApis = [
       { url: 'https://api.ip.sb/geoip', map: d => ({ lat: d.latitude, lon: d.longitude, city: d.city || '' }) },
       { url: 'https://ipapi.co/json/', map: d => ({ lat: d.latitude, lon: d.longitude, city: d.city || d.region || '' }) }
@@ -141,9 +133,8 @@ const WeatherModule = {
       } catch {}
     }
 
-    // 5. 全部失败
     if (permissionDenied) {
-      return { error: '定位权限已被拒绝，请在 iPhone「设置 → Safari → 位置」中允许访问' };
+      return { error: '定位权限已被拒绝，请手动搜索城市' };
     }
     return { error: '自动定位失败，请手动搜索城市' };
   },
@@ -151,110 +142,77 @@ const WeatherModule = {
   async loadWeather(container) {
     const info = container.querySelector('#wt-info');
     const refreshBtn = container.querySelector('#wt-refresh');
-    const manualBtn = container.querySelector('#wt-manual');
-    const manualBox = container.querySelector('#wt-manual-box');
     const errorMsg = container.querySelector('#wt-error-msg');
 
-    // 如果有缓存位置，先显示缓存天气（秒出）
+    // 渲染快捷城市按钮
+    this.renderCitySuggestions(container);
+
+    // 绑定搜索
+    this.bindCitySearch(container);
+
+    // 先尝试缓存位置
     const cached = this.locationCache;
     if (cached) {
       await this.fetchWeather(info, cached.lat, cached.lon, cached.city);
       refreshBtn.style.display = '';
-      manualBtn.textContent = '🔍 切换城市';
     }
 
-    // 后台重新定位
+    // 后台自动定位
     const result = await this.getLocation();
     if (result.coords) {
       this.locationCache = result.coords;
       await this.fetchWeather(info, result.coords.lat, result.coords.lon, result.coords.city);
       refreshBtn.style.display = '';
-      manualBtn.textContent = '🔍 切换城市';
       if (errorMsg) errorMsg.style.display = 'none';
-    } else if (result.error) {
-      // 显示具体错误原因
-      if (!cached) {
-        info.innerHTML = `
-          <div style="color:var(--text-secondary);padding:10px;text-align:center">
-            <div style="font-size:48px;margin-bottom:8px">🌍</div>
-            <div style="font-size:14px;margin-bottom:6px">${result.error}</div>
-            <div style="font-size:12px;color:var(--text-secondary)">点击下方按钮搜索城市</div>
-          </div>
-        `;
-      }
+    } else if (result.error && !cached) {
       if (errorMsg) {
         errorMsg.style.display = 'block';
-        errorMsg.innerHTML = `<span style="font-size:11px;color:var(--text-secondary)">${result.error}</span>`;
+        errorMsg.innerHTML = `<span style="font-size:11px;color:var(--text-secondary)">${result.error}，请在下方搜索城市</span>`;
       }
     }
 
-    // 手动搜索按钮
-    manualBtn.onclick = () => {
-      if (manualBox.style.display === 'none') {
-        manualBox.style.display = 'block';
-        manualBox.innerHTML = `
-          <div class="card" style="margin-top:10px">
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:6px">输入城市名搜索天气</div>
-            <div style="display:flex;gap:8px;align-items:center">
-              <input id="city-input" class="todo-input" style="flex:1;text-align:center" placeholder="如：武汉">
-              <button class="btn btn-blue" id="city-btn">搜索</button>
-            </div>
-            <div id="city-suggestions" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
-          </div>
-        `;
-        this.renderCitySuggestions(manualBox);
-        this.bindCitySearch(container);
-        // 聚焦输入框
-        setTimeout(() => { const inp = manualBox.querySelector('#city-input'); if (inp) inp.focus(); }, 100);
-      } else {
-        manualBox.style.display = 'none';
-      }
-    };
-
-    // 刷新按钮
+    // 当前位置按钮
     refreshBtn.onclick = async () => {
-      info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">🔄 定位中...</div>';
+      info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">📍 定位中...</div>';
       this.locationCache = null;
       Storage.remove('location');
-      const result = await this.getLocation();
-      if (result.coords) {
-        this.locationCache = result.coords;
-        await this.fetchWeather(info, result.coords.lat, result.coords.lon, result.coords.city);
+      const r = await this.getLocation();
+      if (r.coords) {
+        this.locationCache = r.coords;
+        await this.fetchWeather(info, r.coords.lat, r.coords.lon, r.coords.city);
         if (errorMsg) errorMsg.style.display = 'none';
       } else {
-        info.innerHTML = `
-          <div style="color:var(--text-secondary);padding:10px;text-align:center">
-            <div style="font-size:14px;margin-bottom:6px">${result.error}</div>
-          </div>
-        `;
+        info.innerHTML = `<div style="color:var(--text-secondary);padding:10px;text-align:center">${r.error || '定位失败'}</div>`;
       }
     };
   },
 
-  renderCitySuggestions(box) {
-    const suggestions = [
-      '北京', '上海', '广州', '深圳', '成都', '杭州', '南京', '武汉', '西安', '重庆',
-      '香港', '澳门', '台北', '东京', '大阪', '首尔', '釜山',
-      '新加坡', '吉隆坡', '曼谷', '河内', '胡志明市', '雅加达', '马尼拉', '金边', '万象',
-      '迪拜', '多哈', '利雅得', '伊斯坦布尔', '安卡拉', '耶路撒冷', '德黑兰',
-      '伦敦', '巴黎', '柏林', '罗马', '马德里', '巴塞罗那', '莫斯科', '阿姆斯特丹', '布鲁塞尔', '维也纳', '布拉格', '布达佩斯', '华沙', '斯德哥尔摩', '哥本哈根', '赫尔辛基', '里斯本', '雅典', '都柏林', '苏黎世', '日内瓦',
-      '纽约', '洛杉矶', '芝加哥', '旧金山', '西雅图', '华盛顿', '波士顿', '迈阿密', '多伦多', '温哥华', '蒙特利尔', '墨西哥城',
-      '悉尼', '墨尔本', '布里斯班', '奥克兰', '惠灵顿',
-      '圣保罗', '布宜诺斯艾利斯', '圣地亚哥', '利马', '波哥大',
-      '开罗', '内罗毕', '开普敦', '约翰内斯堡', '拉各斯', '卡萨布兰卡',
-      '孟买', '新德里', '班加罗尔', '加尔各答', '伊斯兰堡', '达卡',
-      '基辅', '明斯克', '塔什干', '乌兰巴托'
-    ];
-    const el = box.querySelector('#city-suggestions');
+  renderCitySuggestions(container) {
+    const regions = {
+      '🇨🇳 中国': ['北京', '上海', '广州', '深圳', '成都', '杭州', '南京', '武汉', '西安', '重庆', '香港', '澳门', '台北', '天津', '苏州', '长沙', '青岛', '大连', '厦门', '郑州', '昆明'],
+      '🌏 亚洲': ['东京', '大阪', '首尔', '釜山', '新加坡', '吉隆坡', '曼谷', '清迈', '河内', '胡志明市', '雅加达', '巴厘岛', '马尼拉', '金边', '万象', '仰光', '迪拜', '阿布扎比', '多哈', '利雅得', '伊斯坦布尔', '安卡拉', '耶路撒冷', '德黑兰', '孟买', '新德里', '班加罗尔', '加尔各答', '伊斯兰堡', '达卡', '科伦坡', '加德满都', '乌兰巴托', '塔什干'],
+      '🇪🇺 欧洲': ['伦敦', '巴黎', '柏林', '罗马', '马德里', '巴塞罗那', '莫斯科', '圣彼得堡', '阿姆斯特丹', '布鲁塞尔', '维也纳', '布拉格', '布达佩斯', '华沙', '斯德哥尔摩', '哥本哈根', '赫尔辛基', '奥斯陆', '里斯本', '雅典', '都柏林', '苏黎世', '日内瓦', '米兰', '威尼斯', '佛罗伦萨', '慕尼黑', '法兰克福', '汉堡', '基辅', '明斯克'],
+      '🇺🇸 北美': ['纽约', '洛杉矶', '芝加哥', '旧金山', '西雅图', '华盛顿', '波士顿', '迈阿密', '拉斯维加斯', '圣地亚哥', '波特兰', '费城', '亚特兰大', '休斯顿', '达拉斯', '多伦多', '温哥华', '蒙特利尔', '卡尔加里', '墨西哥城', '坎昆'],
+      '🌏 大洋洲': ['悉尼', '墨尔本', '布里斯班', '珀斯', '阿德莱德', '奥克兰', '惠灵顿', '基督城', '皇后镇', '斐济'],
+      '🌎 南美': ['圣保罗', '里约热内卢', '布宜诺斯艾利斯', '圣地亚哥', '利马', '波哥大', '基多', '蒙得维的亚', '加拉加斯'],
+      '🌍 非洲': ['开罗', '内罗毕', '开普敦', '约翰内斯堡', '拉各斯', '卡萨布兰卡', '马拉喀什', '达累斯萨拉姆', '亚的斯亚贝巴', '毛里求斯']
+    };
+
+    const el = container.querySelector('#city-suggestions');
     if (!el) return;
-    el.innerHTML = suggestions.map(c =>
-      `<button class="btn btn-small city-chip">${c}</button>`
-    ).join('');
+
+    let html = '';
+    for (const [region, cities] of Object.entries(regions)) {
+      html += `<div style="width:100%;font-size:10px;color:var(--text-secondary);margin-top:6px;padding-left:2px">${region}</div>`;
+      html += cities.map(c => `<button class="btn btn-small city-chip" style="font-size:10px;padding:3px 7px">${c}</button>`).join('');
+    }
+    el.innerHTML = html;
+
     el.querySelectorAll('.city-chip').forEach(chip => {
       chip.addEventListener('click', () => {
-        const input = box.querySelector('#city-input');
+        const input = container.querySelector('#city-input');
         input.value = chip.textContent;
-        box.querySelector('#city-btn').click();
+        container.querySelector('#city-btn').click();
       });
     });
   },
@@ -286,20 +244,22 @@ const WeatherModule = {
         </div>
       `;
     } catch {
-      info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">天气获取失败<br><span style="font-size:13px">下拉刷新或检查网络</span></div>';
+      info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">天气获取失败<br><span style="font-size:13px">请检查网络后重试</span></div>';
     }
   },
 
   bindCitySearch(container) {
     const btn = container.querySelector('#city-btn');
     const input = container.querySelector('#city-input');
+    const status = container.querySelector('#city-search-status');
     if (!btn || !input) return;
 
     const search = async () => {
       const city = input.value.trim();
       if (!city) return;
       const info = container.querySelector('#wt-info');
-      info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">搜索中...</div>';
+      info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">🔍 搜索中...</div>';
+      if (status) status.textContent = `正在查找「${city}」...`;
       try {
         const resp = await fetch(
           `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh`
@@ -311,20 +271,19 @@ const WeatherModule = {
           Storage.set('location', coords);
           this.locationCache = coords;
           await this.fetchWeather(info, r.latitude, r.longitude, r.name);
+          if (status) status.textContent = `✅ 已定位到 ${r.name}`;
 
-          const manualBox = container.querySelector('#wt-manual-box');
-          if (manualBox) manualBox.style.display = 'none';
           const refreshBtn = container.querySelector('#wt-refresh');
           if (refreshBtn) refreshBtn.style.display = '';
-          const manualBtn = container.querySelector('#wt-manual');
-          if (manualBtn) manualBtn.textContent = '🔍 切换城市';
           const errorMsg = container.querySelector('#wt-error-msg');
           if (errorMsg) errorMsg.style.display = 'none';
         } else {
-          info.innerHTML = `<div style="color:var(--text-secondary);padding:20px">未找到「${this.escape(city)}」<br><span style="font-size:13px">请尝试其他城市名</span></div>`;
+          info.innerHTML = `<div style="color:var(--text-secondary);padding:20px;text-align:center">未找到「${this.escape(city)}」<br><span style="font-size:13px">请尝试其他拼写或城市名</span></div>`;
+          if (status) status.textContent = `未找到「${city}」，请尝试其他名称`;
         }
       } catch {
-        info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">搜索失败，请检查网络</div>';
+        info.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center">搜索失败，请检查网络</div>';
+        if (status) status.textContent = '网络错误，请重试';
       }
     };
 
