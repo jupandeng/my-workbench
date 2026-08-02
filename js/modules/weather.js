@@ -42,10 +42,11 @@ const WeatherModule = {
           🔍 手动搜索城市
         </button>
         <button class="btn btn-small" id="wt-refresh" style="font-size:11px;color:var(--text-secondary);display:none">
-          🔄 刷新
+          🔄 重新定位
         </button>
       </div>
       <div id="wt-manual-box" style="display:none"></div>
+      <div id="wt-error-msg" style="display:none;text-align:center;padding:8px"></div>
     `;
   },
 
@@ -65,53 +66,86 @@ const WeatherModule = {
     this.clockTimer = setInterval(update, 1000);
   },
 
-  // 自动获取位置：GPS → 缓存 → IP → 手动
+  // 返回 { coords } 或 { error: '原因' }
   async getLocation() {
-    // 1. 尝试 GPS（HTTPS 下可用，iPhone Safari 会弹授权）
-    try {
-      const pos = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          timeout: 10000,
-          maximumAge: 600000,
-          enableHighAccuracy: false
-        });
-      });
-      const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-      // 反查城市名
-      try {
-        const resp = await fetch(
-          `https://geocoding-api.open-meteo.com/v1/search?latitude=${coords.lat}&longitude=${coords.lon}&count=1&language=zh`,
-          { signal: AbortSignal.timeout(3000) }
-        );
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.results && data.results.length) {
-            coords.city = data.results[0].name;
-          }
-        }
-      } catch {}
-      Storage.set('location', coords);
-      return coords;
-    } catch {}
+    // 1. 检查 GPS 硬件是否可用
+    if (!navigator.geolocation) {
+      return { error: '浏览器不支持GPS，请手动搜索城市' };
+    }
 
-    // 2. 先返回缓存（如果有的话）
-    const cached = Storage.get('location');
-    if (cached) return cached;
-
-    // 3. IP 定位兜底
+    // 2. 检查权限状态（如果之前被拒绝，直接跳过）
+    let permissionDenied = false;
     try {
-      const resp = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(5000) });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.latitude && data.longitude) {
-          const coords = { lat: data.latitude, lon: data.longitude, city: data.city || data.region };
-          Storage.set('location', coords);
-          return coords;
-        }
+      if (navigator.permissions) {
+        const perm = await navigator.permissions.query({ name: 'geolocation' });
+        if (perm.state === 'denied') permissionDenied = true;
       }
     } catch {}
 
-    return null;
+    if (!permissionDenied) {
+      try {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            timeout: 10000,
+            maximumAge: 600000,
+            enableHighAccuracy: false
+          });
+        });
+        const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        // 反查城市名
+        try {
+          const resp = await fetch(
+            `https://geocoding-api.open-meteo.com/v1/search?latitude=${coords.lat}&longitude=${coords.lon}&count=1&language=zh`,
+            { signal: AbortSignal.timeout(3000) }
+          );
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.results && data.results.length) {
+              coords.city = data.results[0].name;
+            }
+          }
+        } catch {}
+        Storage.set('location', coords);
+        return { coords };
+      } catch (err) {
+        // err.code: 1=PERMISSION_DENIED, 2=POSITION_UNAVAILABLE, 3=TIMEOUT
+        if (err.code === 1) {
+          return { error: '定位权限被拒绝了' };
+        }
+        // 其他错误继续尝试 IP 定位
+      }
+    } else {
+      // 权限已被拒绝，不尝试 GPS
+    }
+
+    // 3. 有缓存直接返回
+    const cached = Storage.get('location');
+    if (cached) return { coords: cached };
+
+    // 4. IP 定位（ipapi.co 国内可能慢，加 api.ip.sb 备用）
+    const ipApis = [
+      { url: 'https://api.ip.sb/geoip', map: d => ({ lat: d.latitude, lon: d.longitude, city: d.city || '' }) },
+      { url: 'https://ipapi.co/json/', map: d => ({ lat: d.latitude, lon: d.longitude, city: d.city || d.region || '' }) }
+    ];
+    for (const api of ipApis) {
+      try {
+        const resp = await fetch(api.url, { signal: AbortSignal.timeout(4000) });
+        if (resp.ok) {
+          const data = await resp.json();
+          const coords = api.map(data);
+          if (coords.lat && coords.lon) {
+            Storage.set('location', coords);
+            return { coords };
+          }
+        }
+      } catch {}
+    }
+
+    // 5. 全部失败
+    if (permissionDenied) {
+      return { error: '定位权限已被拒绝，请在 iPhone「设置 → Safari → 位置」中允许访问' };
+    }
+    return { error: '自动定位失败，请手动搜索城市' };
   },
 
   async loadWeather(container) {
@@ -119,8 +153,9 @@ const WeatherModule = {
     const refreshBtn = container.querySelector('#wt-refresh');
     const manualBtn = container.querySelector('#wt-manual');
     const manualBox = container.querySelector('#wt-manual-box');
+    const errorMsg = container.querySelector('#wt-error-msg');
 
-    // 如果有缓存位置，先显示缓存天气
+    // 如果有缓存位置，先显示缓存天气（秒出）
     const cached = this.locationCache;
     if (cached) {
       await this.fetchWeather(info, cached.lat, cached.lon, cached.city);
@@ -128,21 +163,29 @@ const WeatherModule = {
       manualBtn.textContent = '🔍 切换城市';
     }
 
-    // 后台重新定位（获取更精确的位置）
-    const loc = await this.getLocation();
-    if (loc) {
-      this.locationCache = loc;
-      await this.fetchWeather(info, loc.lat, loc.lon, loc.city);
+    // 后台重新定位
+    const result = await this.getLocation();
+    if (result.coords) {
+      this.locationCache = result.coords;
+      await this.fetchWeather(info, result.coords.lat, result.coords.lon, result.coords.city);
       refreshBtn.style.display = '';
       manualBtn.textContent = '🔍 切换城市';
-    } else if (!cached) {
-      // 没有任何位置信息，显示手动输入
-      info.innerHTML = `
-        <div style="color:var(--text-secondary);padding:10px">
-          <div style="font-size:48px;margin-bottom:8px">🌍</div>
-          无法自动定位，请手动输入城市
-        </div>
-      `;
+      if (errorMsg) errorMsg.style.display = 'none';
+    } else if (result.error) {
+      // 显示具体错误原因
+      if (!cached) {
+        info.innerHTML = `
+          <div style="color:var(--text-secondary);padding:10px;text-align:center">
+            <div style="font-size:48px;margin-bottom:8px">🌍</div>
+            <div style="font-size:14px;margin-bottom:6px">${result.error}</div>
+            <div style="font-size:12px;color:var(--text-secondary)">点击下方按钮搜索城市</div>
+          </div>
+        `;
+      }
+      if (errorMsg) {
+        errorMsg.style.display = 'block';
+        errorMsg.innerHTML = `<span style="font-size:11px;color:var(--text-secondary)">${result.error}</span>`;
+      }
     }
 
     // 手动搜索按钮
@@ -151,8 +194,9 @@ const WeatherModule = {
         manualBox.style.display = 'block';
         manualBox.innerHTML = `
           <div class="card" style="margin-top:10px">
+            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:6px">输入城市名搜索天气</div>
             <div style="display:flex;gap:8px;align-items:center">
-              <input id="city-input" class="todo-input" style="flex:1;text-align:center" placeholder="输入城市名，如：武汉">
+              <input id="city-input" class="todo-input" style="flex:1;text-align:center" placeholder="如：武汉">
               <button class="btn btn-blue" id="city-btn">搜索</button>
             </div>
             <div id="city-suggestions" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
@@ -160,6 +204,8 @@ const WeatherModule = {
         `;
         this.renderCitySuggestions(manualBox);
         this.bindCitySearch(container);
+        // 聚焦输入框
+        setTimeout(() => { const inp = manualBox.querySelector('#city-input'); if (inp) inp.focus(); }, 100);
       } else {
         manualBox.style.display = 'none';
       }
@@ -167,13 +213,20 @@ const WeatherModule = {
 
     // 刷新按钮
     refreshBtn.onclick = async () => {
-      info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">定位中...</div>';
+      info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">🔄 定位中...</div>';
       this.locationCache = null;
       Storage.remove('location');
-      const newLoc = await this.getLocation();
-      if (newLoc) {
-        this.locationCache = newLoc;
-        await this.fetchWeather(info, newLoc.lat, newLoc.lon, newLoc.city);
+      const result = await this.getLocation();
+      if (result.coords) {
+        this.locationCache = result.coords;
+        await this.fetchWeather(info, result.coords.lat, result.coords.lon, result.coords.city);
+        if (errorMsg) errorMsg.style.display = 'none';
+      } else {
+        info.innerHTML = `
+          <div style="color:var(--text-secondary);padding:10px;text-align:center">
+            <div style="font-size:14px;margin-bottom:6px">${result.error}</div>
+          </div>
+        `;
       }
     };
   },
@@ -247,13 +300,14 @@ const WeatherModule = {
           this.locationCache = coords;
           await this.fetchWeather(info, r.latitude, r.longitude, r.name);
 
-          // 隐藏搜索框
           const manualBox = container.querySelector('#wt-manual-box');
           if (manualBox) manualBox.style.display = 'none';
           const refreshBtn = container.querySelector('#wt-refresh');
           if (refreshBtn) refreshBtn.style.display = '';
           const manualBtn = container.querySelector('#wt-manual');
           if (manualBtn) manualBtn.textContent = '🔍 切换城市';
+          const errorMsg = container.querySelector('#wt-error-msg');
+          if (errorMsg) errorMsg.style.display = 'none';
         } else {
           info.innerHTML = `<div style="color:var(--text-secondary);padding:20px">未找到「${this.escape(city)}」<br><span style="font-size:13px">请尝试其他城市名</span></div>`;
         }

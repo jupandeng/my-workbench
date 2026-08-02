@@ -70,7 +70,8 @@ const HomeModule = {
   },
 
   async loadWeatherCard(el) {
-    const loc = await WeatherModule.getLocation();
+    const result = await WeatherModule.getLocation();
+    const loc = result.coords || null;
     if (!loc) {
       el.innerHTML = '<span style="color:var(--text-secondary)">点击天气卡片设置城市</span>';
       return;
