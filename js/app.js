@@ -41,13 +41,10 @@ const App = {
 
   init() {
     // 注册顺序决定 Tab 顺序
-    this.register(HomeModule);
-    this.register(WeatherModule);
-    this.register(ScheduleModule);
-    this.register(TodoModule);
-    this.register(ShortcutsModule);
-    this.register(FitnessModule);
-    this.register(KaoyanModule);
+    const allMods = [HomeModule, WeatherModule, ScheduleModule, TodoModule, ShortcutsModule, FitnessModule, KaoyanModule];
+    allMods.forEach(m => {
+      if (m && m.id) this.register(m);
+    });
 
     this.renderTabs();
     this.navigate('home');
