@@ -14,11 +14,42 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+  <style>
+    /* 兜底：JS 加载前显示加载中，避免白屏 */
+    #app-loading {
+      display: flex; align-items: center; justify-content: center;
+      height: 100vh; font-family: -apple-system, sans-serif;
+      color: #8e8e93; font-size: 15px;
+    }
+    @media (prefers-color-scheme: dark) {
+      #app-loading { background: #000; color: #98989d; }
+    }
+    .app-error { color: #FF3B30 !important; text-align: center; padding: 20px; }
+    .app-error .err-icon { font-size: 48px; margin-bottom: 12px; }
+    .app-error .err-msg { font-size: 13px; margin-top: 8px; word-break: break-all; }
+  </style>
+</head>
+<body>
   <div id="app">
-    <main id="content"></main>
+    <main id="content">
+      <div id="app-loading">加载中...</div>
+    </main>
     <nav id="tab-bar"></nav>
   </div>
 
+  <script>
+    // 全局错误捕获，方便排查问题
+    window.__appErrors = [];
+    window.onerror = function(msg, url, line, col, err) {
+      var errStr = (err && err.stack) || (msg + ' @ ' + url + ':' + line);
+      window.__appErrors.push(errStr);
+      var el = document.getElementById('app-loading');
+      if (el) {
+        el.className = 'app-error';
+        el.innerHTML = '<div class="err-icon">⚠️</div><div>加载失败</div><div class="err-msg">' + String(msg).slice(0, 200) + '</div><div style="margin-top:12px;font-size:13px"><a href="javascript:location.reload()" style="color:#007AFF">点此重试</a></div>';
+      }
+    };
+  </script>
   <script src="js/storage.js"></script>
   <script src="js/modules/weather.js"></script>
   <script src="js/modules/schedule.js"></script>

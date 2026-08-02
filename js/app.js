@@ -51,4 +51,11 @@ const App = {
   }
 };
 
-document.addEventListener('DOMContentLoaded', () => App.init());
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    App.init();
+  } catch (e) {
+    console.error('App init failed:', e);
+    throw e;
+  }
+});
