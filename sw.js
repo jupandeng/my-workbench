@@ -1,4 +1,4 @@
-const CACHE = 'workbench-v1';
+const CACHE = 'workbench-v2';
 const ASSETS = [
   '.',
   'index.html',
@@ -10,6 +10,8 @@ const ASSETS = [
   'js/modules/schedule.js',
   'js/modules/todo.js',
   'js/modules/shortcuts.js',
+  'js/modules/fitness.js',
+  'js/modules/kaoyan.js',
   'js/modules/home.js'
 ];
 

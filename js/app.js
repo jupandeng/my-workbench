@@ -46,6 +46,8 @@ const App = {
     this.register(ScheduleModule);
     this.register(TodoModule);
     this.register(ShortcutsModule);
+    this.register(FitnessModule);
+    this.register(KaoyanModule);
 
     this.renderTabs();
     this.navigate('home');

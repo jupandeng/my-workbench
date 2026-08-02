@@ -38,6 +38,7 @@ html, body {
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
   user-select: none;
 }
 
@@ -63,14 +64,14 @@ html, body {
 }
 
 .tab-item {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 4px 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 4px 6px;
   color: var(--text-secondary);
-  font-size: 10px; font-weight: 500;
+  font-size: 9px; font-weight: 500;
   cursor: pointer; transition: color 0.2s;
-  min-width: 56px;
+  min-width: 44px; flex: 1;
 }
-.tab-item .tab-icon { font-size: 22px; line-height: 1; }
+.tab-item .tab-icon { font-size: 20px; line-height: 1; }
 .tab-item.active { color: var(--blue); }
 
 /* ===== Cards ===== */
@@ -259,3 +260,75 @@ html, body {
   display: flex; align-items: center; justify-content: center;
 }
 .add-btn:active { opacity: 0.7; }
+
+/* ===== Fitness ===== */
+.ex-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 0;
+  border-bottom: 0.5px solid var(--separator);
+}
+.ex-item:last-child { border-bottom: none; }
+.ex-name { flex: 1; font-size: 15px; font-weight: 500; }
+.ex-detail { font-size: 13px; color: var(--text-secondary); }
+.ex-del {
+  color: var(--red); background: none; border: none;
+  font-size: 16px; cursor: pointer; padding: 6px 8px;
+}
+.f-input {
+  border: none; border-radius: 10px; padding: 10px 12px;
+  font-size: 15px; background: rgba(118,118,128,0.12);
+  color: var(--text); font-family: var(--font); outline: none;
+}
+
+/* ===== Kaoyan ===== */
+.kaoyan-subject {
+  padding: 10px 0;
+  border-bottom: 0.5px solid var(--separator);
+}
+.kaoyan-subject:last-child { border-bottom: none; }
+.sub-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 6px; font-size: 15px; font-weight: 500;
+}
+.sub-bar {
+  height: 6px; background: rgba(118,118,128,0.15);
+  border-radius: 3px; overflow: hidden;
+}
+.sub-fill {
+  height: 100%; border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.sub-btn { font-size: 11px !important; padding: 4px 8px !important; }
+
+/* ===== Week Log (Fitness + Kaoyan) ===== */
+.week-row {
+  display: flex; justify-content: space-around; align-items: center;
+  padding: 4px 0;
+}
+.week-day {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  min-width: 36px;
+}
+.week-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(118,118,128,0.12);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--text-secondary);
+}
+.week-day.trained .week-dot {
+  background: var(--green); color: #fff;
+}
+.week-label { font-size: 11px; color: var(--text-secondary); }
+
+/* Study bar chart */
+.study-bar {
+  width: 24px; height: 80px;
+  background: rgba(118,118,128,0.12);
+  border-radius: 4px; overflow: hidden;
+  display: flex; align-items: flex-end;
+}
+.study-fill {
+  width: 100%; background: var(--blue);
+  border-radius: 4px; transition: height 0.3s;
+  min-height: 2px;
+}
