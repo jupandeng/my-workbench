@@ -70,10 +70,10 @@ const HomeModule = {
   },
 
   async loadWeatherCard(el) {
-    const result = await WeatherModule.getLocation();
-    const loc = result.coords || null;
-    if (!loc) {
-      el.innerHTML = '<span style="color:var(--text-secondary)">点击天气卡片设置城市</span>';
+    // 只用缓存位置，不主动调 GPS（iOS 需要 user gesture）
+    const loc = WeatherModule.locationCache || Storage.get('location');
+    if (!loc || !loc.lat) {
+      el.innerHTML = '<span style="color:var(--text-secondary)">点击「天气」Tab 设置位置</span>';
       return;
     }
     try {

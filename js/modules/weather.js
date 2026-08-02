@@ -25,6 +25,7 @@ const WeatherModule = {
 
   render() {
     const loc = this.locationCache;
+    const hasCache = loc && loc.lat;
     return `
       <div class="home-clock">
         <div class="time" id="wt-time">--:--:--</div>
@@ -32,12 +33,20 @@ const WeatherModule = {
       </div>
       <div class="card weather-main" id="wt-info">
         <div style="color:var(--text-secondary)">
-          ${loc ? '更新天气中...' : '搜索城市查看天气'}
+          ${hasCache ? '更新天气中...' : '点击下方按钮获取天气'}
         </div>
       </div>
-      <div class="card" style="margin-top:10px">
+      <div id="wt-gps-area" style="text-align:center;margin-bottom:10px;${hasCache ? 'display:none' : ''}">
+        <button class="btn btn-blue" id="wt-gps-btn" style="width:100%;padding:12px;font-size:15px">
+          📍 使用我的位置
+        </button>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">
+          点击按钮后 iPhone 会询问定位权限
+        </div>
+      </div>
+      <div class="card" style="margin-top:4px">
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">
-          🌍 搜索全球任意城市天气
+          🌍 或搜索全球任意城市
         </div>
         <div style="display:flex;gap:8px">
           <input id="city-input" class="todo-input" style="flex:1;text-align:center" placeholder="输入城市名，如：东京、伦敦、纽约...">
@@ -141,6 +150,8 @@ const WeatherModule = {
 
   async loadWeather(container) {
     const info = container.querySelector('#wt-info');
+    const gpsArea = container.querySelector('#wt-gps-area');
+    const gpsBtn = container.querySelector('#wt-gps-btn');
     const refreshBtn = container.querySelector('#wt-refresh');
     const errorMsg = container.querySelector('#wt-error-msg');
 
@@ -150,41 +161,39 @@ const WeatherModule = {
     // 绑定搜索
     this.bindCitySearch(container);
 
-    // 先尝试缓存位置
+    // 如果有缓存位置，直接加载天气（不需要权限）
     const cached = this.locationCache;
-    if (cached) {
+    if (cached && cached.lat) {
       await this.fetchWeather(info, cached.lat, cached.lon, cached.city);
-      refreshBtn.style.display = '';
+      if (refreshBtn) refreshBtn.style.display = '';
+      if (gpsArea) gpsArea.style.display = 'none';
     }
 
-    // 后台自动定位
-    const result = await this.getLocation();
-    if (result.coords) {
-      this.locationCache = result.coords;
-      await this.fetchWeather(info, result.coords.lat, result.coords.lon, result.coords.city);
-      refreshBtn.style.display = '';
-      if (errorMsg) errorMsg.style.display = 'none';
-    } else if (result.error && !cached) {
-      if (errorMsg) {
-        errorMsg.style.display = 'block';
-        errorMsg.innerHTML = `<span style="font-size:11px;color:var(--text-secondary)">${result.error}，请在下方搜索城市</span>`;
-      }
-    }
-
-    // 当前位置按钮
-    refreshBtn.onclick = async () => {
-      info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">📍 定位中...</div>';
+    // GPS 按钮：用户主动点击才触发（iOS 要求 user gesture）
+    const doGPS = async () => {
+      if (gpsArea) gpsArea.style.display = 'none';
+      info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">📍 正在获取位置...</div>';
+      // 清除旧缓存，强制重新定位
       this.locationCache = null;
       Storage.remove('location');
       const r = await this.getLocation();
       if (r.coords) {
         this.locationCache = r.coords;
         await this.fetchWeather(info, r.coords.lat, r.coords.lon, r.coords.city);
+        if (refreshBtn) refreshBtn.style.display = '';
         if (errorMsg) errorMsg.style.display = 'none';
       } else {
-        info.innerHTML = `<div style="color:var(--text-secondary);padding:10px;text-align:center">${r.error || '定位失败'}</div>`;
+        info.innerHTML = `<div style="color:var(--text-secondary);padding:20px;text-align:center">
+          <div style="font-size:48px;margin-bottom:8px">📍</div>
+          <div style="font-size:14px">${r.error || '定位失败'}</div>
+          <div style="font-size:12px;margin-top:6px">请在 iPhone「设置 → Safari → 位置」中允许，<br>然后使用下方搜索框查天气</div>
+        </div>`;
+        if (gpsArea) gpsArea.style.display = 'block';
       }
     };
+
+    if (gpsBtn) gpsBtn.onclick = doGPS;
+    if (refreshBtn) refreshBtn.onclick = doGPS;
   },
 
   renderCitySuggestions(container) {
