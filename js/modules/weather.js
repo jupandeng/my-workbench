@@ -24,19 +24,15 @@ const WeatherModule = {
   },
 
   render() {
-    const loc = this.locationCache;
-    const hasCache = loc && loc.lat;
     return `
       <div class="home-clock">
         <div class="time" id="wt-time">--:--:--</div>
         <div class="date" id="wt-date"></div>
       </div>
       <div class="card weather-main" id="wt-info">
-        <div style="color:var(--text-secondary)">
-          ${hasCache ? '更新天气中...' : '点击下方按钮获取天气'}
-        </div>
+        <div style="color:var(--text-secondary)">点击下方按钮获取天气</div>
       </div>
-      <div id="wt-gps-area" style="text-align:center;margin-bottom:10px;${hasCache ? 'display:none' : ''}">
+      <div id="wt-gps-area" style="text-align:center;margin-bottom:10px">
         <button class="btn btn-blue" id="wt-gps-btn" style="width:100%;padding:12px;font-size:15px">
           📍 使用我的位置
         </button>
@@ -55,9 +51,6 @@ const WeatherModule = {
         <div id="city-suggestions" style="margin-top:8px;max-height:160px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:5px"></div>
         <div id="city-search-status" style="font-size:11px;color:var(--text-secondary);margin-top:6px;text-align:center"></div>
       </div>
-      <button class="btn btn-small" id="wt-refresh" style="font-size:11px;color:var(--text-secondary);display:none;margin:8px auto;width:fit-content">
-        📍 使用当前位置
-      </button>
       <div id="wt-error-msg" style="display:none;text-align:center;padding:4px"></div>
     `;
   },
@@ -150,9 +143,7 @@ const WeatherModule = {
 
   async loadWeather(container) {
     const info = container.querySelector('#wt-info');
-    const gpsArea = container.querySelector('#wt-gps-area');
     const gpsBtn = container.querySelector('#wt-gps-btn');
-    const refreshBtn = container.querySelector('#wt-refresh');
     const errorMsg = container.querySelector('#wt-error-msg');
 
     // 渲染快捷城市按钮
@@ -161,39 +152,32 @@ const WeatherModule = {
     // 绑定搜索
     this.bindCitySearch(container);
 
-    // 如果有缓存位置，直接加载天气（不需要权限）
+    // 如果有缓存位置，先加载天气
     const cached = this.locationCache;
     if (cached && cached.lat) {
       await this.fetchWeather(info, cached.lat, cached.lon, cached.city);
-      if (refreshBtn) refreshBtn.style.display = '';
-      if (gpsArea) gpsArea.style.display = 'none';
     }
 
     // GPS 按钮：用户主动点击才触发（iOS 要求 user gesture）
     const doGPS = async () => {
-      if (gpsArea) gpsArea.style.display = 'none';
       info.innerHTML = '<div style="color:var(--text-secondary);padding:20px">📍 正在获取位置...</div>';
-      // 清除旧缓存，强制重新定位
       this.locationCache = null;
       Storage.remove('location');
       const r = await this.getLocation();
       if (r.coords) {
         this.locationCache = r.coords;
         await this.fetchWeather(info, r.coords.lat, r.coords.lon, r.coords.city);
-        if (refreshBtn) refreshBtn.style.display = '';
         if (errorMsg) errorMsg.style.display = 'none';
       } else {
         info.innerHTML = `<div style="color:var(--text-secondary);padding:20px;text-align:center">
           <div style="font-size:48px;margin-bottom:8px">📍</div>
           <div style="font-size:14px">${r.error || '定位失败'}</div>
-          <div style="font-size:12px;margin-top:6px">请在 iPhone「设置 → Safari → 位置」中允许，<br>然后使用下方搜索框查天气</div>
+          <div style="font-size:12px;margin-top:6px">请在 iPhone「设置 → Safari → 位置」中允许，<br>或使用下方搜索框手动查天气</div>
         </div>`;
-        if (gpsArea) gpsArea.style.display = 'block';
       }
     };
 
     if (gpsBtn) gpsBtn.onclick = doGPS;
-    if (refreshBtn) refreshBtn.onclick = doGPS;
   },
 
   renderCitySuggestions(container) {
